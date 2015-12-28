@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd">
+    <http:listener-config name="api-httpListenerConfig" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <apikit:config name="api-config" raml="api.raml" consoleEnabled="true" consolePath="console" doc:name="Router"/>
+    <http:request-config name="HTTP_Request_Configuration" host="0.0.0.0" port="8083" basePath="/write" doc:name="HTTP Request Configuration">
+        <http:raml-api-configuration location="https://anypoint.mulesoft.com/apiplatform/repository/v2/organizations/60d96ee5-370c-435d-bd71-61005ac76b2b/public/apis/47234/versions/48994/files/root"/>
+    </http:request-config>
+    <http:request-config name="HTTP_Request_Configuration1" host="0.0.0.0" port="8082" basePath="/query" doc:name="HTTP Request Configuration">
+        <http:raml-api-configuration location="https://anypoint.mulesoft.com/apiplatform/repository/v2/organizations/60d96ee5-370c-435d-bd71-61005ac76b2b/public/apis/1538/versions/1537/files/root"/>
+    </http:request-config>
+    <flow name="api-main">
+        <http:listener config-ref="api-httpListenerConfig" path="/cqrs/*" doc:name="HTTP"/>
+        <apikit:router config-ref="api-config" doc:name="APIkit Router"/>
+        <exception-strategy ref="api-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="put:/parts/{part_id}:application/xml:api-config">
+        <set-property propertyName="part_id" value="#[flowVars.part_id]" doc:name="Property"/>
+        <vm:outbound-endpoint exchange-pattern="one-way" path="update-part" doc:name="Update Queue"/>
+    </flow>
+    <flow name="business-process-flow">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="update-part" doc:name="Update Queue">
+        	<vm:transaction action="ALWAYS_BEGIN"/>
+        </vm:inbound-endpoint>
+        <http:request config-ref="HTTP_Request_Configuration" path="/parts/{part_id}" method="PUT" doc:name="Parts Command API Call">
+            <http:request-builder>
+                <http:uri-param paramName="part_id" value="#[message.inboundProperties.part_id]"/>
+            </http:request-builder>
+        </http:request>
+    </flow>
+    <flow name="get:/suppliers/search:api-config">
+        <set-payload value="&lt;search-result&gt;&#xA;  &lt;suppliers&gt;&#xA;    &lt;supplier&gt;&#xA;      &lt;supplierId&gt;1&lt;/supplierId&gt;&#xA;      &lt;supplierName&gt;Groß &amp;amp; Schwer&lt;/supplierName&gt;&#xA;      &lt;supplierLocation&gt;DE&lt;/supplierLocation&gt;&#xA;    &lt;/supplier&gt;&#xA;    &lt;supplier&gt;&#xA;      &lt;supplierId&gt;2&lt;/supplierId&gt;&#xA;      &lt;supplierName&gt;Klein und Gut&lt;/supplierName&gt;&#xA;      &lt;supplierLocation&gt;DE&lt;/supplierLocation&gt;&#xA;    &lt;/supplier&gt;&#xA;    &lt;supplier&gt;&#xA;      &lt;supplierId&gt;3&lt;/supplierId&gt;&#xA;      &lt;supplierName&gt;Dick und Glücklich&lt;/supplierName&gt;&#xA;      &lt;supplierLocation&gt;DE&lt;/supplierLocation&gt;&#xA;    &lt;/supplier&gt;&#xA;  &lt;/suppliers&gt;&#xA;&lt;/search-result&gt;" doc:name="Set Payload"/>
+    </flow>
+    <flow name="get:/parts/{part_id}:api-config">
+        <http:request config-ref="HTTP_Request_Configuration1" path="/parts/{part_id}/price" method="GET" doc:name="HTTP">
+            <http:request-builder>
+                <http:query-param paramName="currency-code" value="#[message.inboundProperties['http.query.params']['currency-code']]"/>
+                <http:uri-param paramName="part_id" value="#[flowVars.part_id]"/>
+            </http:request-builder>
+        </http:request>
+    </flow>
+    <flow name="post:/suppliers:application/xml:api-config">
+        <set-payload value="#[NullPayload.getInstance()]" doc:name="Set Payload"/>
+    </flow>
+    <apikit:mapping-exception-strategy name="api-apiKitGlobalExceptionMapping">
+        <apikit:mapping statusCode="404">
+            <apikit:exception value="org.mule.module.apikit.exception.NotFoundException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Resource not found&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>
